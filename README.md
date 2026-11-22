@@ -57,6 +57,7 @@ npm run dev
 | 请求批次 | `request_batch` | 调用批次 | 批次编号、关联端点、参数模板 |
 | 响应解析 | `response_parse` | 解析规则 | 规则编号、目标端点、JSON路径 |
 | Schema差异 | `schema_diff` | 差异记录 | 记录编号、关联端点、变更字段 |
+| 字段转换质量 | `field_quality` | 转换清单 | 清单编号、关联规则、字段名 |
 | 结果缓存 | `data_cache` | 缓存策略 | 策略编号、目标端点、缓存TTL |
 | 重放队列 | `retry_queue` | 重放任务 | 任务编号、失败端点、失败原因 |
 | 数据投递 | `data_delivery` | 投递管道 | 管道编号、数据来源、目标地址 |

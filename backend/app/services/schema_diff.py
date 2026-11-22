@@ -1,8 +1,13 @@
 """Schema差异检测领域服务：管理API Schema变更差异，与 endpoint_def、govern_report、data_version 联动。"""
 from __future__ import annotations
 
+import json
+
 from app.services.base import BaseModuleService
+from app.services.field_quality import FieldQualityService
 from app.store import store
+
+TODAY = "2026-11-22"
 
 
 class SchemaDiffService(BaseModuleService):
@@ -16,7 +21,7 @@ class SchemaDiffService(BaseModuleService):
     NEGATIVE_ACTIONS = ["忽略差异"]
 
     def run_action(self, entry_id: int, action: str):
-        """评估中时更新端点状态和治理报告；确认变更时创建数据版本；忽略差异时记录治理。"""
+        """评估中时更新端点状态和治理报告；确认变更时按质量清单确认可发布范围并同步投递待办；忽略差异时记录治理。"""
         entry, message = super().run_action(entry_id, action)
         if entry is None:
             return entry, message
@@ -25,12 +30,74 @@ class SchemaDiffService(BaseModuleService):
             self._create_govern_watch(entry)
             message += "，已更新端点状态并创建治理观察"
         elif action == "确认变更":
+            scope = self._confirm_with_quality_checklist(entry)
             self._create_data_version(entry)
             self._update_endpoint_status(entry, "已投产")
-            message += "，已创建数据版本并恢复端点状态"
+            message += (
+                f"，已按字段转换质量清单确认可发布{len(scope['已验字段'])}列"
+                f"（待核{len(scope['待核字段'])}列）并同步投递待办"
+            )
         elif action == "忽略差异":
             self._log_ignored_diff(entry)
         return entry, message
+
+    def _confirm_with_quality_checklist(self, diff: dict) -> dict:
+        """以校验清单的告警字段确认新的类型和来源，确认结果同步到投递待办。"""
+        endpoint = diff.get("关联端点", "")
+        quality = FieldQualityService()
+        scope = quality.publishable_fields(endpoint)
+        rows = [r for r in store.rows("field_quality") if r.get("目标端点") == endpoint]
+        # 新的类型和来源以清单为准：已验字段的转换方式即新类型，来源即清单编号；
+        # 缺失/空值占位条目不代表列类型，优先取真实转换（通过）的条目
+        types: dict[str, str] = {}
+        for row in rows:
+            column = row.get("输出列")
+            if column not in scope["已验字段"]:
+                continue
+            if row.get("校验结论") == "通过" or column not in types:
+                types[column] = row.get("转换方式", "")
+        sources = sorted({row.get("清单编号", "") for row in rows})
+        diff["新定义"] = json.dumps(
+            {"已验字段类型": types, "来源": f"字段转换质量清单({','.join(sources)})"},
+            ensure_ascii=False,
+        )
+        warned = sorted({row["字段名"] for row in rows
+                         if str(row.get("校验结论", "")).startswith("告警")})
+        diff["告警字段"] = "、".join(warned) if warned else "无"
+        diff["影响评估"] = (
+            f"{diff.get('影响评估', '').split('；')[0]}；"
+            f"可发布{len(scope['已验字段'])}列，待核{len(scope['待核字段'])}列"
+        )
+        self._sync_delivery_todo(diff, scope, rows)
+        return scope
+
+    def _sync_delivery_todo(self, diff: dict, scope: dict, checklist_rows: list):
+        """确认结果同步到投递待办：没有待办管道则登记一条，已验/待核字段随单走。"""
+        endpoint = diff.get("关联端点", "")
+        rows = store.rows("data_delivery")
+        todo = next((d for d in rows
+                     if d.get("数据来源") == endpoint
+                     and str(d.get("管道编号", "")).startswith("DATA-TODO")), None)
+        if todo is None:
+            todo = {
+                "id": max((int(d.get("id", 0)) for d in rows), default=0) + 1,
+                "管道编号": f"DATA-TODO-{str(diff['id']).zfill(4)}",
+                "数据来源": endpoint,
+                "目标地址": "warehouse.ods_orders",
+                "投递格式": "JSON",
+                "分区策略": "按日",
+                "投递频率": "手动",
+                "压缩方式": "none",
+                "最后投递": "待投递",
+                "status": "待配置", "pending": True, "abnormal": False,
+            }
+            rows.append(todo)
+        todo["已验字段"] = list(scope["已验字段"])
+        todo["待核字段"] = list(scope["待核字段"])
+        todo["关联规则"] = next((r.get("关联规则") for r in checklist_rows if r.get("关联规则")), "")
+        todo["最后投递"] = "待投递"
+        todo["status"] = "待配置"
+        todo["pending"] = True
 
     def _update_endpoint_status(self, diff: dict, new_status: str):
         endpoint_id = diff.get("关联端点", "")

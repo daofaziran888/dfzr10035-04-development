@@ -9,6 +9,7 @@ from app.services.rate_limit import RateLimitService
 from app.services.request_batch import RequestBatchService
 from app.services.response_parse import ResponseParseService
 from app.services.schema_diff import SchemaDiffService
+from app.services.field_quality import FieldQualityService
 from app.services.data_cache import DataCacheService
 from app.services.retry_queue import RetryQueueService
 from app.services.data_delivery import DataDeliveryService
@@ -33,6 +34,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "request_batch": RequestBatchService(),
     "response_parse": ResponseParseService(),
     "schema_diff": SchemaDiffService(),
+    "field_quality": FieldQualityService(),
     "data_cache": DataCacheService(),
     "retry_queue": RetryQueueService(),
     "data_delivery": DataDeliveryService(),

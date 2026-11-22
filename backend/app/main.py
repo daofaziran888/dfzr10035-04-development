@@ -186,6 +186,13 @@ def chain_encrypt_coverage():
     return DataEncryptService().check_encrypt_coverage()
 
 
+@app.get("/api/chain/field-quality/{rule_no}")
+def chain_field_quality(rule_no: str):
+    """链路22：字段转换质量回查（跨 field_quality/response_parse/parse_sample/schema_diff）"""
+    from app.services.field_quality import FieldQualityService
+    return FieldQualityService().quality_trace(rule_no)
+
+
 @app.get("/api/chain/snapshot")
 def chain_snapshot():
     """综合快照：一次性输出所有模块的 domain_snapshot 信息。"""
